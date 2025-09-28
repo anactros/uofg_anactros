@@ -1,17 +1,18 @@
 import streamlit as st
 import pandas as pd
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 import itertools
 import threading
 import time
 
 st.set_page_config(page_title="Live LOB Classroom", layout="wide")
 
-# ---------- Core data models ----------
+# ---------- IDs ----------
 order_id_counter = itertools.count(1)
 trade_id_counter = itertools.count(1)
 
+# ---------- Core data models ----------
 @dataclass(order=True)
 class Order:
     sort_index: float = field(init=False, repr=False)
@@ -23,7 +24,6 @@ class Order:
     ts: float           # submit time
 
     def __post_init__(self):
-        # For correct priority we keep sort keys inside the order book
         self.sort_index = self.ts
 
 @dataclass
@@ -35,15 +35,37 @@ class Trade:
     sell_order_id: int
     ts: float
 
-# ---------- LOB engine with price then time priority and partial fills ----------
+# ---------- Holdings (cash + assets) ----------
+@st.cache_resource
+def get_holdings():
+    return {}
+
+holdings = get_holdings()
+
+def ensure_user(user):
+    if user not in holdings:
+        holdings[user] = {"cash": 10000.0, "assets": 0}
+
+def update_holdings(buy_user, sell_user, price, qty):
+    ensure_user(buy_user)
+    ensure_user(sell_user)
+
+    # Buyer
+    holdings[buy_user]["cash"] -= price * qty
+    holdings[buy_user]["assets"] += qty
+
+    # Seller
+    holdings[sell_user]["cash"] += price * qty
+    holdings[sell_user]["assets"] -= qty
+
+# ---------- OrderBook ----------
 class OrderBook:
     def __init__(self):
         self.lock = threading.Lock()
-        self.bids: List[Order] = []    # sorted by price desc then time asc
-        self.asks: List[Order] = []    # sorted by price asc then time asc
+        self.bids: List[Order] = []
+        self.asks: List[Order] = []
         self.trades: List[Trade] = []
-        self.active = True
-        self.instructor_pin = "1234"   # change in class
+        self.instructor_pin = "010308"   # change in class
 
     def _sort_books(self):
         self.bids.sort(key=lambda o: (-o.price, o.ts))
@@ -54,6 +76,7 @@ class OrderBook:
             self.bids.clear()
             self.asks.clear()
             self.trades.clear()
+            holdings.clear()
 
     def add_order(self, user: str, side: str, price: float, qty: int) -> Order:
         with self.lock:
@@ -71,23 +94,23 @@ class OrderBook:
             self._match()
             return o
 
-    def cancel_order(self, order_id: int, user: Optional[str] = None, force: bool = False) -> bool:
+    def cancel_order(self, order_id: int, user: str = None) -> bool:
         with self.lock:
             for book in (self.bids, self.asks):
                 for i, o in enumerate(book):
-                    if o.id == order_id and (force or user is None or o.user == user):
+                    if o.id == order_id and (user is None or o.user == user):
                         del book[i]
                         return True
         return False
 
     def _match(self):
-        # While best bid crosses best ask execute trades
+        # Match orders while best bid >= best ask
         self._sort_books()
         while self.bids and self.asks and self.bids[0].price >= self.asks[0].price:
             buy = self.bids[0]
             sell = self.asks[0]
             qty = min(buy.qty, sell.qty)
-            price = sell.price if sell.ts <= buy.ts else sell.price  # pay ask by default
+            price = sell.price  # trade at the ask
 
             t = Trade(
                 id=next(trade_id_counter),
@@ -97,7 +120,10 @@ class OrderBook:
                 sell_order_id=sell.id,
                 ts=time.time()
             )
-            self.trades.insert(0, t)  # newest first
+            self.trades.insert(0, t)
+
+            # Update holdings
+            update_holdings(buy.user, sell.user, price, qty)
 
             buy.qty -= qty
             sell.qty -= qty
@@ -109,27 +135,28 @@ class OrderBook:
 
             self._sort_books()
 
-    # Convenience views
+    # Views
     def bids_df(self):
-        with self.lock:
-            return pd.DataFrame(
-                [{"ID": o.id, "Trader": o.user, "Price": o.price, "Qty": o.qty, "Time": pd.to_datetime(o.ts, unit="s")} for o in self.bids]
-            )
+        return pd.DataFrame(
+            [{"ID": o.id, "Trader": o.user, "Price": o.price, "Qty": o.qty,
+              "Time": pd.to_datetime(o.ts, unit="s")} for o in self.bids]
+        )
 
     def asks_df(self):
-        with self.lock:
-            return pd.DataFrame(
-                [{"ID": o.id, "Trader": o.user, "Price": o.price, "Qty": o.qty, "Time": pd.to_datetime(o.ts, unit="s")} for o in self.asks]
-            )
+        return pd.DataFrame(
+            [{"ID": o.id, "Trader": o.user, "Price": o.price, "Qty": o.qty,
+              "Time": pd.to_datetime(o.ts, unit="s")} for o in self.asks]
+        )
 
     def trades_df(self, limit=30):
-        with self.lock:
-            rows = self.trades[:limit]
-            return pd.DataFrame(
-                [{"Trade": t.id, "Price": t.price, "Qty": t.qty, "Buy ID": t.buy_order_id, "Sell ID": t.sell_order_id, "Time": pd.to_datetime(t.ts, unit="s")} for t in rows]
-            )
+        rows = self.trades[:limit]
+        return pd.DataFrame(
+            [{"Trade": t.id, "Price": t.price, "Qty": t.qty,
+              "Buy ID": t.buy_order_id, "Sell ID": t.sell_order_id,
+              "Time": pd.to_datetime(t.ts, unit="s")} for t in rows]
+        )
 
-# A single shared book for the whole app session
+# Shared book instance
 @st.cache_resource
 def get_order_book():
     return OrderBook()
@@ -137,14 +164,13 @@ def get_order_book():
 book = get_order_book()
 
 # ---------- UI ----------
-st.title("Live Limit Order Book")
+st.title("Live Limit Order Book Simulation")
 
-# Left column for order entry, right columns for live book and trades
 c1, c2 = st.columns([1, 2])
 
 with c1:
-    st.subheader("Submit order")
-    user = st.text_input("Your name or alias")
+    st.subheader("Submit Order")
+    user = st.text_input("Your alias")
     side = st.selectbox("Side", ["BUY", "SELL"])
     price = st.number_input("Limit price", min_value=0.0, value=100.0, step=0.5)
     qty = st.number_input("Quantity", min_value=1, value=1, step=1)
@@ -153,10 +179,10 @@ with c1:
         st.success("Order accepted")
 
     st.divider()
-    st.subheader("Cancel your order")
+    st.subheader("Cancel Order")
     cancel_id = st.number_input("Order ID to cancel", min_value=1, step=1)
     if st.button("Cancel order", use_container_width=True):
-        ok = book.cancel_order(int(cancel_id), user=user or None, force=False)
+        ok = book.cancel_order(int(cancel_id), user=user or None)
         st.success("Order cancelled") if ok else st.warning("Order not found or not yours")
 
     st.divider()
@@ -170,23 +196,37 @@ with c1:
                 st.error("Wrong PIN")
 
 with c2:
-    st.subheader("Order book")
+    st.subheader("Order Book")
     b1, b2 = st.columns(2)
     with b1:
-        st.caption("Bids highest price first")
-        bids_df = book.bids_df()
-        st.dataframe(bids_df, use_container_width=True, height=350)
+        st.caption("Bids (highest price first)")
+        st.dataframe(book.bids_df(), use_container_width=True, height=350)
     with b2:
-        st.caption("Asks lowest price first")
-        asks_df = book.asks_df()
-        st.dataframe(asks_df, use_container_width=True, height=350)
+        st.caption("Asks (lowest price first)")
+        st.dataframe(book.asks_df(), use_container_width=True, height=350)
 
-    st.subheader("Recent trades")
+    st.subheader("Recent Trades")
     st.dataframe(book.trades_df(), use_container_width=True, height=260)
 
-# Light auto refresh so the screen updates while students trade
-from streamlit_autorefresh import st_autorefresh
-
-# Auto-refresh every 2 seconds (2000 ms)
-st_autorefresh(interval=2000, limit=None, key="refresh")
+# ---------- Leaderboard ----------
+st.divider()
+with st.expander("Instructor Leaderboard (PIN required)"):
+    pin = st.text_input("PIN", type="password", key="leaderboard_pin")
+    if pin == book.instructor_pin:
+        st.subheader("Leaderboard")
+        fundamental_value = st.number_input("Reveal fundamental value", min_value=0.0, value=100.0, step=1.0)
+        if st.button("Compute Final Wealth"):
+            results = []
+            for user, h in holdings.items():
+                wealth = h["cash"] + h["assets"] * fundamental_value
+                profit = wealth - 100  # relative to starting endowment
+                results.append({
+                    "Trader": user,
+                    "Cash": round(h["cash"], 2),
+                    "Assets": h["assets"],
+                    "Final Wealth": round(wealth, 2),
+                    "Profit": round(profit, 2)
+                })
+            df = pd.DataFrame(results).sort_values("Final Wealth", ascending=False)
+            st.dataframe(df, use_container_width=True)
 
