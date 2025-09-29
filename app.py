@@ -7,6 +7,11 @@ import threading
 import time
 
 st.set_page_config(page_title="Live LOB Classroom", layout="wide")
+from streamlit_autorefresh import st_autorefresh
+
+# Refresh every 3 seconds
+st_autorefresh(interval=3000, key="orderbook_refresh")
+
 
 # ---------- Simulation Parameters ----------
 START_CASH = 300.0
