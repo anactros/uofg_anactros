@@ -8,6 +8,11 @@ import time
 
 st.set_page_config(page_title="Live LOB Classroom", layout="wide")
 
+# ---------- Simulation Parameters ----------
+START_CASH = 300.0
+START_ASSETS = 3
+FUNDAMENTAL_DEFAULT = 101.5
+
 # ---------- IDs ----------
 order_id_counter = itertools.count(1)
 trade_id_counter = itertools.count(1)
@@ -44,7 +49,7 @@ holdings = get_holdings()
 
 def ensure_user(user):
     if user not in holdings:
-        holdings[user] = {"cash": 10000.0, "assets": 0}
+        holdings[user] = {"cash": START_CASH, "assets": START_ASSETS}
 
 def update_holdings(buy_user, sell_user, price, qty):
     ensure_user(buy_user)
@@ -65,7 +70,7 @@ class OrderBook:
         self.bids: List[Order] = []
         self.asks: List[Order] = []
         self.trades: List[Trade] = []
-        self.instructor_pin = "010308"   # change in class
+        self.instructor_pin = "010308"   # change for class
 
     def _sort_books(self):
         self.bids.sort(key=lambda o: (-o.price, o.ts))
@@ -104,7 +109,6 @@ class OrderBook:
         return False
 
     def _match(self):
-        # Match orders while best bid >= best ask
         self._sort_books()
         while self.bids and self.asks and self.bids[0].price >= self.asks[0].price:
             buy = self.bids[0]
@@ -164,7 +168,7 @@ def get_order_book():
 book = get_order_book()
 
 # ---------- UI ----------
-st.title("Live Limit Order Book Simulation")
+st.title("Live LOB ECON5143")
 
 c1, c2 = st.columns([1, 2])
 
@@ -172,8 +176,8 @@ with c1:
     st.subheader("Submit Order")
     user = st.text_input("Your alias")
     side = st.selectbox("Side", ["BUY", "SELL"])
-    price = st.number_input("Limit price", min_value=0.0, value=100.0, step=0.5)
-    qty = st.number_input("Quantity", min_value=1, value=1, step=1)
+    price = st.number_input("Limit price", min_value=0.0, value=FUNDAMENTAL_DEFAULT, step=0.5)
+    qty = 1  # fixed to 1
     if st.button("Place order", use_container_width=True, disabled=(not user)):
         book.add_order(user=user.strip() or "Anon", side=side, price=price, qty=qty)
         st.success("Order accepted")
@@ -214,12 +218,18 @@ with st.expander("Instructor Leaderboard (PIN required)"):
     pin = st.text_input("PIN", type="password", key="leaderboard_pin")
     if pin == book.instructor_pin:
         st.subheader("Leaderboard")
-        fundamental_value = st.number_input("Reveal fundamental value", min_value=0.0, value=100.0, step=1.0)
+        fundamental_value = st.number_input(
+            "Reveal fundamental value",
+            min_value=0.0,
+            value=FUNDAMENTAL_DEFAULT,
+            step=0.1
+        )
         if st.button("Compute Final Wealth"):
+            initial_wealth = START_CASH + START_ASSETS * fundamental_value
             results = []
             for user, h in holdings.items():
                 wealth = h["cash"] + h["assets"] * fundamental_value
-                profit = wealth - 100  # relative to starting endowment
+                profit = wealth - initial_wealth
                 results.append({
                     "Trader": user,
                     "Cash": round(h["cash"], 2),
@@ -229,4 +239,3 @@ with st.expander("Instructor Leaderboard (PIN required)"):
                 })
             df = pd.DataFrame(results).sort_values("Final Wealth", ascending=False)
             st.dataframe(df, use_container_width=True)
-
