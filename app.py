@@ -99,14 +99,6 @@ class OrderBook:
             self._match()
             return o
 
-    def cancel_order(self, order_id: int, user: str = None) -> bool:
-        with self.lock:
-            for book in (self.bids, self.asks):
-                for i, o in enumerate(book):
-                    if o.id == order_id and (user is None or o.user == user):
-                        del book[i]
-                        return True
-        return False
 
     def _match(self):
         self._sort_books()
@@ -182,12 +174,6 @@ with c1:
         book.add_order(user=user.strip() or "Anon", side=side, price=price, qty=qty)
         st.success("Order accepted")
 
-    st.divider()
-    st.subheader("Cancel Order")
-    cancel_id = st.number_input("Order ID to cancel", min_value=1, step=1)
-    if st.button("Cancel order", use_container_width=True):
-        ok = book.cancel_order(int(cancel_id), user=user or None)
-        st.success("Order cancelled") if ok else st.warning("Order not found or not yours")
 
     st.divider()
     with st.expander("Instructor controls"):
