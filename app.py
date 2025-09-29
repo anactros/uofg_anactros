@@ -16,7 +16,7 @@ st_autorefresh(interval=5000, key="orderbook_refresh")
 # ---------- Simulation Parameters ----------
 START_CASH = 300.0
 START_ASSETS = 3
-FUNDAMENTAL_DEFAULT = 101.5
+FUNDAMENTAL_DEFAULT = 100.0
 
 # ---------- IDs ----------
 order_id_counter = itertools.count(1)
