@@ -203,6 +203,17 @@ with c2:
     st.subheader("Recent Trades")
     st.dataframe(book.trades_df(), use_container_width=True, height=260)
 
+    st.subheader("Price Chart")
+    if book.trades:
+        df_chart = pd.DataFrame(
+            [{"Time": pd.to_datetime(t.ts, unit="s"), "Price": t.price}
+             for t in reversed(book.trades)]  # reversed = chronological order
+        )
+        st.line_chart(df_chart.set_index("Time"), height=250)
+    else:
+        st.info("No trades yet")
+
+
 # ---------- Leaderboard ----------
 st.divider()
 with st.expander("Instructor Leaderboard (PIN required)"):
