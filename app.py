@@ -168,7 +168,7 @@ with c1:
     st.subheader("Submit Order")
     user = st.text_input("Your alias")
     side = st.selectbox("Side", ["BUY", "SELL"])
-    price = st.number_input("Limit price", min_value=0.0, value=100, step=0.5)
+    price = st.number_input("Limit price", min_value=0.0, value=100.0, step=0.5)
     qty = 1  # fixed to 1
     if st.button("Place order", use_container_width=True, disabled=(not user)):
         book.add_order(user=user.strip() or "Anon", side=side, price=price, qty=qty)
