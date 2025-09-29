@@ -171,7 +171,7 @@ c1, c2 = st.columns([1, 2])
 
 with c1:
     st.subheader("Submit Order")
-    user = st.text_input("Your alias")
+    user = st.text_input("Your trader ID")
     side = st.selectbox("Side", ["BUY", "SELL"])
     price = st.number_input("Limit price", min_value=0.0, value=100.0, step=0.5)
     qty = 1  # fixed to 1
